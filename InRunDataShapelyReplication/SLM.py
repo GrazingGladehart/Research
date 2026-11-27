@@ -1,33 +1,47 @@
+from dataclasses import dataclass
+from typing import Optional
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+
+@dataclass(frozen=True)
+class ModelConfig:
+    batch_size: int = 64
+    block_size: int = 128
+    max_iters: int = 4001
+    eval_interval: int = 1000
+    eval_iters: int = 100
+    learning_rate: float = 1e-2
+    device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    n_embd: int = 256
+    n_head: int = 4
+    n_layer: int = 4
+    dropout: float = 0.2
+
+    def __post_init__(self):
+        if self.n_head <= 0 or self.n_embd % self.n_head != 0:
+            raise ValueError("n_embd must be divisible by a positive n_head")
+        if self.block_size <= 0:
+            raise ValueError("block_size must be positive")
+        if not 0 <= self.dropout < 1:
+            raise ValueError("dropout must be in the range [0, 1)")
+
+
 class Head(nn.Module):
 
-    def __init__(self, head_size):
+    def __init__(self, head_size, config):
         super().__init__()
 
-        # Hyperparams
-        self.batch_size = 64 
-        self.block_size = 128
-        self.max_iters = 5001
-        self.eval_interval = 1000
-        self.eval_iters = 100
-        self.learning_rate = 1e-2
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.n_embd = 256
-        self.n_head = 8
-        self.n_layer = 6
-        self.dropout = 0.2
-
         # Transformer Head
-        self.key = nn.Linear(self.n_embd, head_size, bias=False)
-        self.query = nn.Linear(self.n_embd, head_size, bias=False)
-        self.value = nn.Linear(self.n_embd, head_size, bias=False)
-        self.register_buffer('tril', torch.tril(torch.ones(self.block_size, self.block_size)))
+        self.key = nn.Linear(config.n_embd, head_size, bias=False)
+        self.query = nn.Linear(config.n_embd, head_size, bias=False)
+        self.value = nn.Linear(config.n_embd, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(config.block_size, config.block_size)))
 
         # Dropout
-        self.dropout = nn.Dropout(self.dropout)
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         B, T, _ = x.shape
@@ -48,11 +62,11 @@ class Head(nn.Module):
 
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, num_heads, head_size):
+    def __init__(self, num_heads, head_size, config):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        self.proj = nn.Linear(self.n_embd, self.n_embd)
-        self.dropout = nn.Dropout(self.dropout)
+        self.heads = nn.ModuleList([Head(head_size, config) for _ in range(num_heads)])
+        self.proj = nn.Linear(config.n_embd, config.n_embd)
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
@@ -63,13 +77,13 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
     """ Linear layer followed by nonlinearity """
 
-    def __init__(self, n_embd):
+    def __init__(self, n_embd, dropout):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
             nn.ReLU(),
             nn.Linear(4 * n_embd, n_embd),
-            nn.Dropout(self.dropout)
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):
@@ -79,13 +93,13 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
     """ Transformer block: communication followed by computation """
 
-    def __init__(self, n_embd, n_head):
+    def __init__(self, config):
         super().__init__()
-        head_size = n_embd // n_head
-        self.sa = MultiHeadAttention(n_head, head_size)
-        self.ffwd = FeedForward(n_embd)
-        self.ln1 = nn.LayerNorm(n_embd)
-        self.ln2 = nn.LayerNorm(n_embd)
+        head_size = config.n_embd // config.n_head
+        self.sa = MultiHeadAttention(config.n_head, head_size, config)
+        self.ffwd = FeedForward(config.n_embd, config.dropout)
+        self.ln1 = nn.LayerNorm(config.n_embd)
+        self.ln2 = nn.LayerNorm(config.n_embd)
 
     def forward(self, x):
         x = x + self.sa(self.ln1(x))
@@ -95,31 +109,32 @@ class Block(nn.Module):
 
 class SmallLanguageModel(nn.Module):
 
-    def __init__(self):
+    def __init__(self, config: Optional[ModelConfig] = None):
         super().__init__()
-            
+        self.config = config if config is not None else ModelConfig()
+
         # Read Data
         self.read_data()
 
         # each token directly reads off the logits for the next token from a lookup table
-        self.token_embedding_table = nn.Embedding(self.vocab_size, self.n_embd)
-        self.position_embedding_table = nn.Embedding(self.block_size, self.n_embd)
-        self.blocks = nn.Sequential(*[Block(self.n_embd, n_head=self.n_head) for _ in range(self.n_layer)])
-        self.ln_f = nn.LayerNorm(self.n_embd) # final layer norm
-        self.lm_head = nn.Linear(self.n_embd, self.vocab_size)
+        self.token_embedding_table = nn.Embedding(self.vocab_size, self.config.n_embd)
+        self.position_embedding_table = nn.Embedding(self.config.block_size, self.config.n_embd)
+        self.blocks = nn.Sequential(*[Block(self.config) for _ in range(self.config.n_layer)])
+        self.ln_f = nn.LayerNorm(self.config.n_embd) # final layer norm
+        self.lm_head = nn.Linear(self.config.n_embd, self.vocab_size)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
 
         # idx and targets are both (B,T) tensor of integers
         tok_emb = self.token_embedding_table(idx) # (B,T,C)
-        pos_emb = self.position_embedding_table(torch.arange(T, device=self.device)) # (T,C)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=idx.device)) # (T,C)
         x = tok_emb + pos_emb # (B,T,C)
         x = self.blocks(x) # (B,T,C)
         x = self.ln_f(x) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
 
-        if targets==None:
+        if targets is None:
             loss=None
         else:
             B, T, C = logits.shape
@@ -132,8 +147,9 @@ class SmallLanguageModel(nn.Module):
     
     def read_data(self):
 
-        path = 'data/shakespeare.txt'
-        with open(path,'r',encoding='utf-8') as f:
+        p = 'data/shakespeare.txt'
+        print('Reading data from:', p)
+        with open(p,'r',encoding='utf-8') as f:
             text = f.read()
 
         print('Character length of dataset:',len(text))
@@ -155,11 +171,11 @@ class SmallLanguageModel(nn.Module):
 
 
 
-    def generate(self, idx, max_new_tokens=1):
+    def generate(self, idx, max_new_tokens):
         # idx is (B, T) array of indices in the current context
         for _ in range(max_new_tokens):
             # crop to get block_size tokens
-            idx_cond = idx[:, -self.block_size:]
+            idx_cond = idx[:, -self.config.block_size:]
             # get the predictions
             logits, loss = self(idx_cond)
             # focus only on the last time step
@@ -171,3 +187,25 @@ class SmallLanguageModel(nn.Module):
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
+
+    def next_token(self,idx=None):
+
+        if idx == None:
+            idx = torch.zeros((1,1),dtype=torch.long, device=self.config.device)
+
+        # crop to get block_size tokens
+        idx_cond = idx[:, -self.config.block_size:]
+        # get the predictions
+        logits, loss = self(idx_cond)
+        # focus only on the last time step
+        logits = logits[:, -1, :] # becomes (B, C)
+        # apply softmax to get probabilities
+        probs = F.softmax(logits, dim=-1) # (B, C)
+        # sample from the distribution
+        idx_next = torch.multinomial(probs, num_samples=1) # (B, 1)
+        # Add new char to context
+        idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+        # Convert inferred token to human-readable
+        out = self.decode(idx_next[0].tolist())
+
+        return idx, out
