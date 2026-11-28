@@ -1,0 +1,35 @@
+commit e9dc1c2799fde147f6b93efe231d8ad5ede52814
+Author: GrazingGladehart <gabe.hjerstedt@gmail.com>
+Date:   Fri Nov 27 13:14:34 2026 -0500
+
+    add next token inferencing to a locally imported model
+
+commit 7ae412f61b108bd279369568ded463e894c9dd00
+Author: GrazingGladehart <gabe.hjerstedt@gmail.com>
+Date:   Fri Nov 27 11:36:59 2026 -0500
+
+    save model weights
+
+commit c66af18d396e47af20a42ce9dc090806b6be0b80
+Author: GrazingGladehart <gabe.hjerstedt@gmail.com>
+Date:   Thu Nov 26 12:10:43 2026 -0500
+
+    rename folder
+
+commit 2254282825f55b2cd61059576ffe764d7222575e
+Author: GrazingGladehart <gabe.hjerstedt@gmail.com>
+Date:   Wed Nov 25 10:15:22 2026 -0500
+
+    add nanoGPT neural architecture
+
+commit 81b2573a4d3479f50fe05e290e4a5c0430d03266
+Author: GrazingGladehart <gabe.hjerstedt@gmail.com>
+Date:   Wed Nov 25 10:08:16 2026 -0500
+
+    add shakespeare text dataset
+
+commit 46f98ec81967bdcf9ef036a99d4831bfcec4e419
+Author: Gabriel Hjerstedt <gabe.hjerstedt@gmail.com>
+Date:   Wed Nov 25 09:56:01 2026 -0500
+
+    Initial commit
